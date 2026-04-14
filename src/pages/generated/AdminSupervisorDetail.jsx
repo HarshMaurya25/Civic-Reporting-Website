@@ -66,7 +66,7 @@ function WardMiniMap({ feature }) {
     mapRef.current = L.map(mapNodeRef.current, {
       zoomControl: false,
       attributionControl: false,
-    }).setView([28.6139, 77.209], 12);
+    }).setView([28.6139, 77.209], 11);
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
@@ -107,36 +107,31 @@ function WardMiniMap({ feature }) {
   return <div ref={mapNodeRef} className="h-56 rounded-lg" />;
 }
 
-function IssueMatrixTable({ matrix }) {
-  if (!matrix) return null;
-  const rows = [
-    { label: "Daily", bucket: matrix.daily },
-    { label: "Weekly", bucket: matrix.weekly },
-    { label: "Monthly", bucket: matrix.monthly },
-  ];
+const PIE_COLORS = ["#1d4ed8", "#f59e0b", "#16a34a"];
 
+function MiniPie({ title, data, hasData }) {
+  if (!hasData) {
+    return (
+      <div className="bg-surface-container-low rounded-xl p-4 flex flex-col items-center justify-center min-h-[220px]">
+        <p className="text-[10px] uppercase font-bold text-outline tracking-widest mb-3">{title}</p>
+        <div className="w-28 h-28 rounded-full border-[6px] border-outline-variant/20 flex items-center justify-center">
+          <span className="text-xs font-bold text-outline">No Data</span>
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className="overflow-auto rounded-xl border border-outline-variant/15">
-      <table className="w-full text-sm">
-        <thead className="bg-surface-container-low">
-          <tr>
-            <th className="text-left px-4 py-3">Period</th>
-            <th className="text-left px-4 py-3">Reported</th>
-            <th className="text-left px-4 py-3">In Progress</th>
-            <th className="text-left px-4 py-3">Solved</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.label} className="border-b border-outline-variant/10">
-              <td className="px-4 py-3 font-semibold">{row.label}</td>
-              <td className="px-4 py-3">{row.bucket?.reported ?? 0}</td>
-              <td className="px-4 py-3">{row.bucket?.inBetween ?? 0}</td>
-              <td className="px-4 py-3">{row.bucket?.solved ?? 0}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="bg-surface-container-low rounded-xl p-4 min-h-[220px]">
+      <p className="text-[10px] uppercase font-bold text-outline tracking-widest mb-2 text-center">{title}</p>
+      <ResponsiveContainer width="100%" height={170}>
+        <PieChart>
+          <Pie data={data} dataKey="value" nameKey="name" outerRadius={60} innerRadius={28} label={({ name, value }) => `${name}: ${value}`} labelLine={false}>
+            {data.map((e, i) => <Cell key={e.name} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+          </Pie>
+          <Tooltip />
+          <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+        </PieChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -210,11 +205,6 @@ export default function AdminSupervisorDetail() {
     return (workforce?.supervisors || []).find((s) => s.id === id) || null;
   }, [workforce, id]);
 
-  const workersUnder = useMemo(() => {
-    if (!workforce?.workers?.length) return [];
-    return workforce.workers.filter((w) => w.supervisorId === id);
-  }, [workforce, id]);
-
   const wardFeature = useMemo(() => {
     if (!wardGeoJson) return null;
     const wardId = supervisorRow?.wardId || "";
@@ -222,18 +212,21 @@ export default function AdminSupervisorDetail() {
     return pickWardFeature(wardGeoJson, wardId, wardName);
   }, [wardGeoJson, supervisorRow]);
 
-  const pieData = useMemo(() => {
-    const bucket =
-      wardMatrix?.monthly || wardMatrix?.weekly || wardMatrix?.daily;
+  const makePieData = (bucket) => {
     if (!bucket) return [];
     return [
       { name: "Reported", value: bucket.reported ?? 0 },
       { name: "In Progress", value: bucket.inBetween ?? 0 },
       { name: "Solved", value: bucket.solved ?? 0 },
     ];
-  }, [wardMatrix]);
+  };
 
-  const colors = ["#1d4ed8", "#f59e0b", "#16a34a"];
+  const dailyPie = useMemo(() => makePieData(wardMatrix?.daily), [wardMatrix]);
+  const weeklyPie = useMemo(() => makePieData(wardMatrix?.weekly), [wardMatrix]);
+  const monthlyPie = useMemo(() => makePieData(wardMatrix?.monthly), [wardMatrix]);
+  const hasDailyData = dailyPie.some((d) => d.value > 0);
+  const hasWeeklyData = weeklyPie.some((d) => d.value > 0);
+  const hasMonthlyData = monthlyPie.some((d) => d.value > 0);
 
   return (
     <div className="pt-24 px-8 pb-12 space-y-6">
@@ -255,7 +248,7 @@ export default function AdminSupervisorDetail() {
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <article className="bg-surface-container-lowest rounded-xl p-5 space-y-4">
               <h2 className="font-bold">Personal Details</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-1 gap-3 text-sm">
                 <div className="bg-surface-container-low rounded-lg p-3">
                   <p className="text-xs uppercase text-outline">Name</p>
                   <p className="font-semibold">
@@ -266,7 +259,7 @@ export default function AdminSupervisorDetail() {
                 </div>
                 <div className="bg-surface-container-low rounded-lg p-3">
                   <p className="text-xs uppercase text-outline">Email</p>
-                  <p className="font-semibold">
+                  <p className="font-semibold break-all">
                     {supervisorProfile?.email || "N/A"}
                   </p>
                 </div>
@@ -276,38 +269,39 @@ export default function AdminSupervisorDetail() {
                     {supervisorProfile?.phoneNumber || "N/A"}
                   </p>
                 </div>
-                <div className="bg-surface-container-low rounded-lg p-3">
-                  <p className="text-xs uppercase text-outline">Age</p>
-                  <p className="font-semibold">
-                    {supervisorProfile?.age || "N/A"}
-                  </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-surface-container-low rounded-lg p-3">
+                    <p className="text-xs uppercase text-outline">Age</p>
+                    <p className="font-semibold">
+                      {supervisorProfile?.age || "N/A"}
+                    </p>
+                  </div>
+                  <div className="bg-surface-container-low rounded-lg p-3">
+                    <p className="text-xs uppercase text-outline">Ward</p>
+                    <p className="font-semibold">
+                      {supervisorRow?.wardName || "Unassigned"}
+                    </p>
+                  </div>
                 </div>
                 <div className="bg-surface-container-low rounded-lg p-3">
-                  <p className="text-xs uppercase text-outline">Ward</p>
+                  <p className="text-xs uppercase text-outline">Status</p>
                   <p className="font-semibold">
-                    {supervisorRow?.wardName || "N/A"}
-                  </p>
-                </div>
-                <div className="bg-surface-container-low rounded-lg p-3">
-                  <p className="text-xs uppercase text-outline">Started</p>
-                  <p className="font-semibold">
-                    {String(supervisorRow?.started)}
+                    {supervisorRow?.started ? "Active" : "Not started"}
                   </p>
                 </div>
               </div>
             </article>
 
             <article className="lg:col-span-2 bg-surface-container-lowest rounded-xl p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="font-bold">Ward Map</h2>
-                <p className="text-xs text-outline">Ward-only view</p>
-              </div>
+              <h2 className="font-bold">Ward Map</h2>
               {wardFeature ? (
                 <WardMiniMap feature={wardFeature} />
               ) : (
-                <p className="text-sm text-outline">
-                  Ward polygon not available.
-                </p>
+                <div className="h-56 rounded-xl bg-surface-container-low flex items-center justify-center">
+                  <p className="text-sm text-outline">
+                    Ward polygon not available.
+                  </p>
+                </div>
               )}
             </article>
           </section>
@@ -315,7 +309,7 @@ export default function AdminSupervisorDetail() {
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <article className="bg-surface-container-lowest rounded-xl p-5 space-y-4">
               <h2 className="font-bold">Ward Details</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="bg-surface-container-low rounded-lg p-3">
                   <p className="text-xs uppercase text-outline">Ward</p>
                   <p className="font-semibold">
@@ -323,104 +317,36 @@ export default function AdminSupervisorDetail() {
                   </p>
                 </div>
                 <div className="bg-surface-container-low rounded-lg p-3">
-                  <p className="text-xs uppercase text-outline">Region</p>
-                  <p className="font-semibold">
-                    {wardDetail?.regionName || "N/A"}
-                  </p>
-                </div>
-                <div className="bg-surface-container-low rounded-lg p-3">
                   <p className="text-xs uppercase text-outline">Workers</p>
                   <p className="font-semibold">
-                    {wardDetail?.workerCount ?? workersUnder.length}
+                    {wardDetail?.workerCount ?? 0}
                   </p>
                 </div>
                 <div className="bg-surface-container-low rounded-lg p-3">
                   <p className="text-xs uppercase text-outline">
-                    Unfinished Issues
+                    Open Issues
                   </p>
                   <p className="font-semibold">
-                    {wardDetail?.unfinishedIssueCount ?? "N/A"}
+                    {wardDetail?.unfinishedIssueCount ?? 0}
+                  </p>
+                </div>
+                <div className="bg-surface-container-low rounded-lg p-3">
+                  <p className="text-xs uppercase text-outline">Region</p>
+                  <p className="font-semibold">
+                    {wardDetail?.regionName || supervisorRow?.location || "N/A"}
                   </p>
                 </div>
               </div>
-
-              <h3 className="font-bold pt-2">Ward Issue Matrix</h3>
-              <IssueMatrixTable matrix={wardMatrix} />
             </article>
 
             <article className="bg-surface-container-lowest rounded-xl p-5 space-y-4">
-              <h2 className="font-bold">Ward Pie Chart</h2>
-              {!pieData.length ? (
-                <p className="text-sm text-outline">No matrix data to chart.</p>
-              ) : (
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={pieData}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={100}
-                        label
-                      >
-                        {pieData.map((_, index) => (
-                          <Cell
-                            key={index}
-                            fill={colors[index % colors.length]}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
+              <h2 className="font-bold">Issue Statistics</h2>
+              <div className="grid grid-cols-3 gap-3">
+                <MiniPie title="Daily" data={dailyPie} hasData={hasDailyData} />
+                <MiniPie title="Weekly" data={weeklyPie} hasData={hasWeeklyData} />
+                <MiniPie title="Monthly" data={monthlyPie} hasData={hasMonthlyData} />
+              </div>
             </article>
-          </section>
-
-          <section className="bg-surface-container-lowest rounded-xl overflow-auto">
-            <div className="p-4 border-b border-outline-variant/10">
-              <h2 className="font-bold">Workers Under Supervisor</h2>
-            </div>
-            <table className="w-full text-sm">
-              <thead className="bg-surface-container-low">
-                <tr>
-                  <th className="text-left px-4 py-3">Name</th>
-                  <th className="text-left px-4 py-3">Ward</th>
-                  <th className="text-left px-4 py-3">Started</th>
-                  <th className="text-left px-4 py-3">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {workersUnder.map((w) => (
-                  <tr key={w.id} className="border-b border-outline-variant/10">
-                    <td className="px-4 py-3 font-semibold">{w.username}</td>
-                    <td className="px-4 py-3">{w.wardName || "N/A"}</td>
-                    <td className="px-4 py-3">{String(w.started)}</td>
-                    <td className="px-4 py-3">
-                      <button
-                        className="text-primary font-semibold hover:underline"
-                        onClick={() =>
-                          navigate(`/admin/workforce/worker/${w.id}`)
-                        }
-                      >
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {!workersUnder.length && (
-                  <tr>
-                    <td className="px-4 py-3 text-outline" colSpan={4}>
-                      No workers assigned.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
           </section>
         </>
       )}

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { getIssueDetail, getSupervisorMap } from "../../services/api";
+import { getIssueDetail, getSupervisorMap, getAdminWards } from "../../services/api";
 import { getUser } from "../../lib/session";
 
 function markerColor(criticality) {
@@ -19,12 +19,14 @@ export default function SupervisorWardMap() {
   const mapRef = useRef(null);
   const layerRef = useRef(null);
   const mapNodeRef = useRef(null);
+  const boundsRef = useRef(null);
 
   const [issues, setIssues] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [matrix, setMatrix] = useState(null);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [selectedIssueDetail, setSelectedIssueDetail] = useState(null);
+  const [assignedWardFeature, setAssignedWardFeature] = useState(null);
 
   const [criticalityFilter, setCriticalityFilter] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState("ALL");
@@ -48,11 +50,30 @@ export default function SupervisorWardMap() {
       setLoading(true);
       setError("");
       try {
-        const response = await getSupervisorMap(user.id);
+        const [response, wardData] = await Promise.all([
+          getSupervisorMap(user.id),
+          getAdminWards().catch(() => null)
+        ]);
+        
         if (mounted) {
           setIssues(response?.issues || []);
           setWorkers(response?.workers || []);
-          setMatrix(response?.matrix || null);
+          const matrixData = response?.matrix || null;
+          setMatrix(matrixData);
+
+          // Find ward feature
+          if (matrixData?.wardId && wardData?.geojson) {
+            const raw = wardData.geojson;
+            let features = [];
+            if (raw?.type === "FeatureCollection") features = raw.features;
+            else if (raw?.features) features = raw.features;
+            
+            const feature = (features || []).find(f => 
+              (f?.properties?.wardId || f?.properties?.id) === matrixData.wardId ||
+              (f?.properties?.wardName || f?.properties?.name) === (matrixData.wardName || matrixData.name)
+            );
+            setAssignedWardFeature(feature || null);
+          }
         }
       } catch (err) {
         if (mounted) {
@@ -120,17 +141,35 @@ export default function SupervisorWardMap() {
       .sort((a, b) => b.count - a.count);
   }, [hotspotCountMap]);
 
+  // Ward name from matrix (instead of showing UUID)
+  const wardDisplayName = useMemo(() => {
+    return matrix?.wardName || matrix?.name || "My Ward";
+  }, [matrix]);
+
   useEffect(() => {
     if (!mapNodeRef.current || mapRef.current) return;
 
-    mapRef.current = L.map(mapNodeRef.current).setView([28.6139, 77.209], 12);
+    mapRef.current = L.map(mapNodeRef.current).setView([28.6139, 77.209], 14);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "© OpenStreetMap contributors",
       maxZoom: 19,
     }).addTo(mapRef.current);
 
-    setTimeout(() => mapRef.current?.invalidateSize(), 0);
-  }, []);
+    setTimeout(() => mapRef.current?.invalidateSize(), 100);
+    setTimeout(() => mapRef.current?.invalidateSize(), 500);
+
+    // Initial center fallback to geolocation if no data yet
+    if (navigator?.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (!mapRef.current || filteredIssues.length > 0) return;
+          mapRef.current.setView([pos.coords.latitude, pos.coords.longitude], 13);
+        },
+        () => {},
+        { timeout: 5000 }
+      );
+    }
+  }, [loading]);
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -168,13 +207,31 @@ export default function SupervisorWardMap() {
 
     layerRef.current.addTo(mapRef.current);
 
-    if (filteredIssues.length) {
+    if (assignedWardFeature) {
+      // Priority 1: Focus on the assigned ward polygon
+      const geoLayer = L.geoJSON(assignedWardFeature);
+      const bounds = geoLayer.getBounds();
+      mapRef.current.fitBounds(bounds.pad(0.1));
+      
+      // Also restrict panning to this ward area (+ buffer)
+      const expandedBounds = bounds.pad(1.0);
+      boundsRef.current = expandedBounds;
+      mapRef.current.setMaxBounds(expandedBounds);
+      mapRef.current.options.maxBoundsViscosity = 0.8;
+    } else if (filteredIssues.length) {
+      // Priority 2: Focus on issue clusters if polygon not found
       const bounds = L.latLngBounds(
         filteredIssues.map((issue) => [issue.latitude, issue.longitude]),
       );
       mapRef.current.fitBounds(bounds.pad(0.2));
+
+      // Set pan boundary at 1.5x the issue area
+      const expandedBounds = bounds.pad(1.5);
+      boundsRef.current = expandedBounds;
+      mapRef.current.setMaxBounds(expandedBounds);
+      mapRef.current.options.maxBoundsViscosity = 0.8;
     }
-  }, [filteredIssues]);
+  }, [filteredIssues, assignedWardFeature]);
 
   return (
     <div className="pt-24 px-8 pb-12 space-y-6">
@@ -246,7 +303,7 @@ export default function SupervisorWardMap() {
           <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-surface-container-lowest p-5 rounded-xl border-l-4 border-primary">
               <p className="text-xs uppercase font-bold text-outline">Ward</p>
-              <p className="text-2xl font-black">{matrix?.wardId || "N/A"}</p>
+              <p className="text-2xl font-black">{wardDisplayName}</p>
             </div>
             <div className="bg-surface-container-lowest p-5 rounded-xl border-l-4 border-secondary">
               <p className="text-xs uppercase font-bold text-outline">

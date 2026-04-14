@@ -201,13 +201,30 @@ export default function AdminWardsMap() {
       maxZoom: 19,
     }).addTo(mapRef.current);
 
-    setTimeout(() => mapRef.current?.invalidateSize(), 0);
+    // Try user geolocation for city-level view
+    if (navigator?.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (!mapRef.current) return;
+          const { latitude: lat, longitude: lng } = pos.coords;
+          if (typeof lat === "number" && typeof lng === "number") {
+            mapRef.current.setView([lat, lng], 11);
+          }
+        },
+        () => {},
+        { enableHighAccuracy: true, maximumAge: 60_000, timeout: 5_000 },
+      );
+    }
+
+    // Invalidate size with multiple delays to handle layout timing
+    setTimeout(() => mapRef.current?.invalidateSize(), 100);
+    setTimeout(() => mapRef.current?.invalidateSize(), 500);
 
     return () => {
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [loading]);
 
   useEffect(() => {
     if (!mapRef.current) return;

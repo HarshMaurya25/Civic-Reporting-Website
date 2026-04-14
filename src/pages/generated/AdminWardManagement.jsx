@@ -223,7 +223,7 @@ export default function AdminWardManagement() {
           const { latitude: lat, longitude: lng } = pos.coords;
           if (typeof lat === "number" && typeof lng === "number") {
             hasInitialCenterRef.current = true;
-            mapRef.current.setView([lat, lng], 14);
+            mapRef.current.setView([lat, lng], 11);
           }
         },
         () => {},
@@ -239,7 +239,18 @@ export default function AdminWardManagement() {
     mapNodeRef.current = node;
     if (node) {
       // Small delay to ensure DOM is painted
-      requestAnimationFrame(() => initMap());
+      requestAnimationFrame(() => {
+        if (!mapInitializedRef.current) {
+          initMap();
+        } else if (mapRef.current) {
+          // Map already exists, just invalidate size
+          setTimeout(() => mapRef.current?.invalidateSize(), 50);
+        } else {
+          // Map was somehow destroyed, re-init
+          mapInitializedRef.current = false;
+          initMap();
+        }
+      });
     }
   }, [initMap]);
 
@@ -316,7 +327,11 @@ export default function AdminWardManagement() {
   /* ── Invalidate on view changes ── */
   useEffect(() => {
     if (view !== "detail") {
-      setTimeout(() => mapRef.current?.invalidateSize(), 50);
+      setTimeout(() => {
+        if (mapRef.current) {
+          mapRef.current.invalidateSize();
+        }
+      }, 100);
     }
   }, [view]);
 
@@ -371,10 +386,16 @@ export default function AdminWardManagement() {
     setWardMatrix(null);
     setWardDetail(null);
 
+    // Guard: backend requires at least one of wardId or wardName
+    const hasWardId = wardId && wardId.trim();
+    const hasWardName = wardName && wardName.trim();
+
     try {
       const [detail, matrix] = await Promise.all([
-        getWardDetail(wardId || undefined, wardName || undefined).catch(() => null),
-        wardId ? getAdminIssueMatrix(wardId).catch(() => null) : Promise.resolve(null),
+        (hasWardId || hasWardName)
+          ? getWardDetail(hasWardId || undefined, hasWardName || undefined).catch(() => null)
+          : Promise.resolve(null),
+        hasWardId ? getAdminIssueMatrix(wardId).catch(() => null) : Promise.resolve(null),
       ]);
       setWardDetail(detail);
       setWardMatrix(matrix);
@@ -390,6 +411,8 @@ export default function AdminWardManagement() {
       await allocateWardToSupervisor(selectedWardId, supervisorId);
       setMessage("Supervisor assigned successfully.");
       setShowSupervisorModal(false);
+      // Small delay to let backend propagate
+      await new Promise((r) => setTimeout(r, 500));
       await load();
       // re-select to refresh detail
       await selectWard(selectedWardId, selectedWardName);
@@ -416,8 +439,13 @@ export default function AdminWardManagement() {
       await load();
       // Re-invalidate map after ward list refreshes
       setTimeout(() => {
-        mapRef.current?.invalidateSize();
-      }, 100);
+        if (mapRef.current) {
+          mapRef.current.invalidateSize();
+        } else if (mapNodeRef.current) {
+          mapInitializedRef.current = false;
+          initMap();
+        }
+      }, 200);
     } catch (err) {
       setMessage(err.message || "Failed to delete ward.");
     } finally {
@@ -793,6 +821,21 @@ export default function AdminWardManagement() {
           {/* ══════ DETAIL VIEW ══════ */}
           {view === "detail" && (
             <>
+              {/* Ward Name Header */}
+              <div className="bg-surface-container-lowest rounded-xl p-5 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <span className="text-primary font-black text-lg">
+                    {(selectedWardMeta?.wardName || selectedWardMeta?.name || selectedWardName || "W")[0]?.toUpperCase()}
+                  </span>
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-primary">
+                    {selectedWardMeta?.wardName || selectedWardMeta?.name || selectedWardName || "Ward"}
+                  </h2>
+                  <p className="text-xs text-outline">{wardDetail?.regionName || selectedWardMeta?.region || ""}</p>
+                </div>
+              </div>
+
               {/* Ward map + Supervisor */}
               <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Map */}
@@ -811,27 +854,27 @@ export default function AdminWardManagement() {
                 <article className="bg-surface-container-lowest rounded-xl p-5 space-y-4">
                   <h2 className="font-bold">Supervisor</h2>
 
-                  {wardDetail?.supervisorName ? (
+                  {(wardDetail?.supervisorName || selectedWardMeta?.supervisorName) ? (
                     <div className="rounded-xl border border-outline-variant/15 p-4 space-y-3 bg-gradient-to-br from-primary/3 to-transparent">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
                           <span className="text-primary font-black text-sm">
-                            {(wardDetail.supervisorName || "?")[0]?.toUpperCase()}
+                            {((wardDetail?.supervisorName || selectedWardMeta?.supervisorName) || "?")[0]?.toUpperCase()}
                           </span>
                         </div>
                         <div>
-                          <p className="font-bold text-sm">{wardDetail.supervisorName}</p>
+                          <p className="font-bold text-sm">{wardDetail?.supervisorName || selectedWardMeta?.supervisorName}</p>
                           <p className="text-xs text-outline">Assigned Supervisor</p>
                         </div>
                       </div>
                       <div className="grid grid-cols-1 gap-2 text-sm">
                         <div className="flex items-center gap-2 text-on-surface-variant">
                           <span className="text-xs font-medium text-outline w-16">Email</span>
-                          <span>{wardDetail.supervisorEmail || "N/A"}</span>
+                          <span className="break-all">{wardDetail?.supervisorEmail || "N/A"}</span>
                         </div>
                         <div className="flex items-center gap-2 text-on-surface-variant">
                           <span className="text-xs font-medium text-outline w-16">Phone</span>
-                          <span>{wardDetail.supervisorPhoneNumber || "N/A"}</span>
+                          <span>{wardDetail?.supervisorPhoneNumber || "N/A"}</span>
                         </div>
                         <div className="flex items-center gap-2 text-on-surface-variant">
                           <span className="text-xs font-medium text-outline w-16">Region</span>
