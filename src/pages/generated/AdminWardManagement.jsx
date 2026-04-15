@@ -55,6 +55,11 @@ function pickWardFeature(fc, wardId, wardName) {
   }) || null;
 }
 
+function normalizeWardId(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
 const PIE_COLORS = ["#1d4ed8", "#f59e0b", "#16a34a"];
 
 /* ───────── Sub-components ───────── */
@@ -172,7 +177,8 @@ export default function AdminWardManagement() {
   const mapInitializedRef = useRef(false);
 
   /* ── Load data ── */
-  const load = useCallback(async () => {
+  const load = useCallback(async (options = {}) => {
+    const { focusWardId = "", fitAll = false } = options;
     setLoading(true);
     setError("");
     try {
@@ -180,9 +186,31 @@ export default function AdminWardManagement() {
         getAdminWards(),
         getAdminWorkforce(),
       ]);
-      setWards(wardData.wards || []);
-      setWardBoundaryGeoJson(extractFeatureCollection(wardData.geojson));
+      const nextWards = wardData.wards || [];
+      const nextGeoJson = extractFeatureCollection(wardData.geojson);
+      setWards(nextWards);
+      setWardBoundaryGeoJson(nextGeoJson);
       setSupervisors(workforce.supervisors || []);
+
+      if (mapRef.current && nextGeoJson) {
+        const normalizedFocusId = normalizeWardId(focusWardId);
+        let targetFeature = null;
+        if (normalizedFocusId) {
+          targetFeature = pickWardFeature(nextGeoJson, normalizedFocusId, "");
+        }
+
+        try {
+          if (targetFeature) {
+            const bounds = L.geoJSON(targetFeature).getBounds();
+            mapRef.current.fitBounds(bounds.pad(0.2));
+          } else if (fitAll) {
+            const bounds = L.geoJSON(nextGeoJson).getBounds();
+            mapRef.current.fitBounds(bounds.pad(0.2));
+          }
+        } catch {
+          // ignore map fit errors
+        }
+      }
     } catch (err) {
       setError(err.message || "Failed to load ward data.");
     } finally {
@@ -387,15 +415,22 @@ export default function AdminWardManagement() {
     setWardDetail(null);
 
     // Guard: backend requires at least one of wardId or wardName
-    const hasWardId = wardId && wardId.trim();
-    const hasWardName = wardName && wardName.trim();
+    const normalizedWardId = normalizeWardId(wardId);
+    const normalizedWardName = String(wardName || "").trim();
+    const hasWardId = !!normalizedWardId;
+    const hasWardName = !!normalizedWardName;
 
     try {
       const [detail, matrix] = await Promise.all([
         (hasWardId || hasWardName)
-          ? getWardDetail(hasWardId || undefined, hasWardName || undefined).catch(() => null)
+          ? getWardDetail(
+              hasWardId ? normalizedWardId : undefined,
+              hasWardId ? undefined : normalizedWardName,
+            ).catch(() => null)
           : Promise.resolve(null),
-        hasWardId ? getAdminIssueMatrix(wardId).catch(() => null) : Promise.resolve(null),
+        hasWardId
+          ? getAdminIssueMatrix(normalizedWardId).catch(() => null)
+          : Promise.resolve(null),
       ]);
       setWardDetail(detail);
       setWardMatrix(matrix);
@@ -413,7 +448,7 @@ export default function AdminWardManagement() {
       setShowSupervisorModal(false);
       // Small delay to let backend propagate
       await new Promise((r) => setTimeout(r, 500));
-      await load();
+      await load({ fitAll: true });
       // re-select to refresh detail
       await selectWard(selectedWardId, selectedWardName);
     } catch (err) {
@@ -436,16 +471,8 @@ export default function AdminWardManagement() {
       setWardDetail(null);
       setWardMatrix(null);
       setView("overview");
-      await load();
-      // Re-invalidate map after ward list refreshes
-      setTimeout(() => {
-        if (mapRef.current) {
-          mapRef.current.invalidateSize();
-        } else if (mapNodeRef.current) {
-          mapInitializedRef.current = false;
-          initMap();
-        }
-      }, 200);
+      await load({ fitAll: true });
+      setTimeout(() => mapRef.current?.invalidateSize(), 120);
     } catch (err) {
       setMessage(err.message || "Failed to delete ward.");
     } finally {
@@ -478,9 +505,14 @@ export default function AdminWardManagement() {
       };
       await uploadWardGeoJson(fc);
 
+      const refreshed = await getAdminWards().catch(() => null);
+      const match = (refreshed?.wards || []).find(
+        (w) =>
+          (w.wardName || w.name || "").toLowerCase() ===
+          effectiveName.toLowerCase(),
+      );
+      const createdWardId = String(match?.wardId || match?.id || "");
       if (createSupervisorId) {
-        const refreshed = await getAdminWards().catch(() => null);
-        const match = (refreshed?.wards || []).find((w) => (w.wardName || w.name || "").toLowerCase() === effectiveName.toLowerCase());
         if (match?.wardId || match?.id) {
           await allocateWardToSupervisor(String(match.wardId || match.id), String(createSupervisorId));
         }
@@ -493,7 +525,10 @@ export default function AdminWardManagement() {
       setCreateSupervisorId("");
       drawLayerRef.current?.clearLayers();
       // Refresh without unmounting map
-      await load();
+      await load({ focusWardId: createdWardId, fitAll: !createdWardId });
+      if (createdWardId) {
+        await selectWard(createdWardId, effectiveName);
+      }
     } catch (err) {
       setMessage(err.message || "Failed to create ward.");
     }
@@ -539,7 +574,7 @@ export default function AdminWardManagement() {
       setMessage(`Uploaded ${fc.features.length} ward(s) successfully!`);
       setJsonFileName("");
       setJsonFileContent(null);
-      await load();
+      await load({ fitAll: true });
       setView("overview");
     } catch (err) {
       setMessage(err.message || "Failed to upload GeoJSON.");

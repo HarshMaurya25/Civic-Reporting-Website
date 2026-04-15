@@ -169,13 +169,18 @@ export default function AdminSupervisorDetail() {
         setWardGeoJson(extractFeatureCollection(wardsData?.geojson));
         setSupervisorProfile(profile);
 
-        const supervisorRow = (wf?.supervisors || []).find((s) => s.id === id);
-        const wardId = supervisorRow?.wardId || "";
+        const supervisorRow = (wf?.supervisors || []).find(
+          (s) => String(s.id) === String(id),
+        );
+        const wardId = String(supervisorRow?.wardId || "").trim();
         const wardName = supervisorRow?.wardName || "";
 
         const [wd, matrix] = await Promise.all([
           wardId || wardName
-            ? getWardDetail(wardId || undefined, wardName || undefined).catch(
+            ? getWardDetail(
+                wardId || undefined,
+                wardId ? undefined : wardName || undefined,
+              ).catch(
                 () => null,
               )
             : Promise.resolve(null),
@@ -202,7 +207,11 @@ export default function AdminSupervisorDetail() {
   }, [id]);
 
   const supervisorRow = useMemo(() => {
-    return (workforce?.supervisors || []).find((s) => s.id === id) || null;
+    return (
+      (workforce?.supervisors || []).find(
+        (s) => String(s.id) === String(id),
+      ) || null
+    );
   }, [workforce, id]);
 
   const wardFeature = useMemo(() => {

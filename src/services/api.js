@@ -140,7 +140,9 @@ export function getAdminMapIssues() {
 }
 
 export function getWardDetail(wardId, wardName) {
-  const query = makeQuery({ wardId, wardName });
+  const query = wardId
+    ? makeQuery({ wardId })
+    : makeQuery({ wardName });
   return get(`/api/admin/wards/detail${query ? `?${query}` : ""}`);
 }
 
@@ -288,6 +290,87 @@ export function getSupervisorIssueMatrix(supervisorId, wardId) {
 
 export function getSupervisorMapIssues(wardId) {
   return get(`/api/issue/map/supervisor?wardId=${wardId}`);
+}
+
+function mapStageToSupervisorStatus(stage) {
+  const normalized = String(stage || "").toUpperCase();
+  if (normalized === "IN_PROGRESS") return "IN_PROGRESS";
+  if (normalized === "RESOLVED") return "RESOLVED";
+  return "OPEN";
+}
+
+function normalizeSupervisorIssue(issue = {}) {
+  const lat = Number(issue.latitude ?? issue.lat ?? issue.locationLat);
+  const lng = Number(issue.longitude ?? issue.lng ?? issue.locationLng);
+  return {
+    id: issue.id,
+    title: issue.title || "Untitled Issue",
+    description: issue.description || "",
+    wardId: issue.wardId || issue.ward?.id || "",
+    wardName: issue.wardName || issue.ward?.name || issue.ward || "N/A",
+    latitude: Number.isFinite(lat) ? lat : null,
+    longitude: Number.isFinite(lng) ? lng : null,
+    status: issue.status || mapStageToSupervisorStatus(issue.stages),
+    stages: issue.stages || "",
+    createdAt: issue.createdAt || issue.createAt || "",
+    criticality: issue.criticality || "LOW",
+    issueType: issue.issueType || "OTHER",
+  };
+}
+
+export async function getSupervisorIssues({ supervisorId, wardId, status } = {}) {
+  const matrix = await getSupervisorIssueMatrix(supervisorId, wardId).catch(
+    () => null,
+  );
+  const resolvedWardId = wardId || matrix?.wardId;
+
+  if (!resolvedWardId) {
+    return {
+      matrix,
+      wardId: "",
+      issues: [],
+      wards: [],
+    };
+  }
+
+  // Try dedicated endpoint first.
+  const query = makeQuery({ supervisorId, wardId: resolvedWardId });
+  const direct = await get(
+    `/api/supervisior/issues${query ? `?${query}` : ""}`,
+  ).catch(() => null);
+
+  let issueRows = [];
+  if (Array.isArray(direct)) {
+    issueRows = direct;
+  } else if (Array.isArray(direct?.content)) {
+    issueRows = direct.content;
+  } else {
+    // Fallback to map endpoint and hydrate details.
+    const mapRows = await getSupervisorMapIssues(resolvedWardId).catch(() => []);
+    issueRows = await Promise.all(
+      (mapRows || []).map(async (row) => {
+        const detail = await getIssueDetail(row.id).catch(() => null);
+        return { ...row, ...(detail || {}) };
+      }),
+    );
+  }
+
+  const normalized = issueRows.map(normalizeSupervisorIssue);
+  const filteredByStatus = status
+    ? normalized.filter((item) => item.status === status)
+    : normalized;
+
+  return {
+    matrix,
+    wardId: resolvedWardId,
+    issues: filteredByStatus,
+    wards: [
+      {
+        wardId: resolvedWardId,
+        wardName: matrix?.wardName || matrix?.name || "Assigned Ward",
+      },
+    ],
+  };
 }
 
 export function getWorkerAssignedIssues(workerId) {

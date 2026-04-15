@@ -92,6 +92,18 @@ export default function SupervisorLayout() {
             </span>
             Ward Map
           </NavLink>
+          <NavLink to="/supervisor/matrix" className={getNavLinkClass}>
+            <span className="material-symbols-outlined" data-icon="query_stats">
+              query_stats
+            </span>
+            Matrix
+          </NavLink>
+          <NavLink to="/supervisor/issues" className={getNavLinkClass}>
+            <span className="material-symbols-outlined" data-icon="assignment">
+              assignment
+            </span>
+            Issues
+          </NavLink>
           <NavLink to="/supervisor/workers" className={getNavLinkClass}>
             <span className="material-symbols-outlined" data-icon="groups">
               groups

@@ -17,6 +17,8 @@ import AdminWorkforceManagement from "./pages/generated/AdminWorkforceManagement
 import AdminSupervisorDetail from "./pages/generated/AdminSupervisorDetail";
 import AdminWorkerDetail from "./pages/generated/AdminWorkerDetail";
 import SupervisorDashboard from "./pages/generated/SupervisorDashboard";
+import SupervisorMatrix from "./pages/generated/SupervisorMatrix";
+import SupervisorIssueManagement from "./pages/generated/SupervisorIssueManagement";
 import SupervisorWardMap from "./pages/generated/SupervisorWardMap";
 import SupervisorWorkersPanel from "./pages/generated/SupervisorWorkersPanel";
 
@@ -86,11 +88,13 @@ function AppRoutes() {
       >
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<SupervisorDashboard />} />
+        <Route path="matrix" element={<SupervisorMatrix />} />
+        <Route path="issues" element={<SupervisorIssueManagement />} />
         <Route path="ward-map" element={<SupervisorWardMap />} />
         <Route path="workers" element={<SupervisorWorkersPanel />} />
         <Route
           path="my-issues"
-          element={<Navigate to="dashboard" replace />}
+          element={<Navigate to="issues" replace />}
         />
         <Route
           path="my-workers"
